@@ -71,6 +71,10 @@ public abstract class AbstractTicketValidationFilter extends AbstractCasFilter {
      */
     private boolean useSession = true;
 
+    private static final String X_REAL_IP = "x-real-ip";
+
+    private String internalIp = null;
+
     protected AbstractTicketValidationFilter(final Protocol protocol) {
         super(protocol);
     }
@@ -83,6 +87,10 @@ public abstract class AbstractTicketValidationFilter extends AbstractCasFilter {
      */
     protected TicketValidator getTicketValidator(final FilterConfig filterConfig) {
         return this.ticketValidator;
+    }
+
+    public void setInternalIp(String internalIp) {
+        this.internalIp = internalIp;
     }
 
     /**
@@ -132,6 +140,7 @@ public abstract class AbstractTicketValidationFilter extends AbstractCasFilter {
         setExceptionOnValidationFailure(getBoolean(ConfigurationKeys.EXCEPTION_ON_VALIDATION_FAILURE));
         setRedirectAfterValidation(getBoolean(ConfigurationKeys.REDIRECT_AFTER_VALIDATION));
         setUseSession(getBoolean(ConfigurationKeys.USE_SESSION));
+        setInternalIp(getString(ConfigurationKeys.INTERNAL_IP));
 
         if (!this.useSession && this.redirectAfterValidation) {
             logger.warn("redirectAfterValidation parameter may not be true when useSession parameter is false. Resetting it to false in order to prevent infinite redirects.");
@@ -192,12 +201,18 @@ public abstract class AbstractTicketValidationFilter extends AbstractCasFilter {
     public final void doFilter(final ServletRequest servletRequest, final ServletResponse servletResponse,
                                final FilterChain filterChain) throws IOException, ServletException {
 
+        final HttpServletRequest request = (HttpServletRequest) servletRequest;
+        final HttpServletResponse response = (HttpServletResponse) servletResponse;
+
         if (!preFilter(servletRequest, servletResponse, filterChain)) {
+            if (isInternalRequest(request)) {
+                logger.debug("Request is ignored [internal].");
+                filterChain.doFilter(request, response);
+            }
+
             return;
         }
 
-        final HttpServletRequest request = (HttpServletRequest) servletRequest;
-        final HttpServletResponse response = (HttpServletResponse) servletResponse;
         final String ticket = retrieveTicketFromRequest(request);
 
         if (CommonUtils.isNotBlank(ticket)) {
@@ -254,5 +269,15 @@ public abstract class AbstractTicketValidationFilter extends AbstractCasFilter {
 
     public final void setUseSession(final boolean useSession) {
         this.useSession = useSession;
+    }
+
+    private boolean isInternalRequest(final HttpServletRequest request) {
+        if (this.internalIp == null) {
+            return false;
+        }
+
+        String realIp = request.getHeader(X_REAL_IP);
+
+        return this.internalIp.equals(realIp);
     }
 }
